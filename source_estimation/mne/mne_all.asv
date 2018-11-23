@@ -1,0 +1,219 @@
+% ##### CALCULATE L2-MNE ON TIME POINTS OF INTEREST #####
+
+% This script calculates an l2-MNE on time points of interest for each
+% individual, converts the result on to a template brain, and then saves
+% the output.
+% Input is grand average structure used by FieldTrip
+
+% Author: Nigel Rogasch, Monash University
+
+clear; close all; clc;
+
+ID = {'001';'002';'004';'005';'006';'007';'008';'009';'010';'011';'012';'013';'014';'015'};
+con = {'average'}; % two experimental sessions seperated by at least a week
+site = {'pfc';'ppc'}; % two different stimulation sites
+tr = {'T0'}; % two different time points within a day - t0 = baseline, t1 = following drug/placebo
+useData = 'ica_final'; % 'sound_final' | 'ica_final'
+
+% Time of interest
+toi = [25,35,45,55,75,110,200];
+
+% Plot data
+plotData = 'off'; %'on' | 'off'
+
+% Location of 'sound_final' file
+pathDef = 'I:\nmda_tms_eeg\';
+
+% Create input path
+if strcmp(useData,'ica_final')
+    pathIn = [pathDef,'CLEAN_ICA\'];
+elseif strcmp(useData,'sound_final')
+    pathIn = [pathDef,'CLEAN_SOUND\'];
+end
+
+addpath ('C:\Users\Nigel\Desktop\fieldtrip-20170815');
+ft_defaults;
+
+% Load EEG data
+load([pathIn,'grandAverage_N14.mat']);
+
+for sitex = 1:length(site)
+    for toix = 1:length(toi)
+        current_all = [];
+        for idx = 1:length(ID)
+            
+            % Load individual leadfield matrix
+            lfPathIn = ['F:\brainstorm_db\TMS-EEG_NMDA\data\sub',ID{idx,1},'\',ID{idx,1},'_C1_tms_pfc_FINAL_T0_avref\'];
+            LFM = load([lfPathIn,'headmodel_surf_openmeeg_02.mat']);
+            
+            % Load leadfield matrix channel order
+            load([lfPathIn,'channel.mat']);
+            
+            % Load anatomy
+            pathAN = ['F:\brainstorm_db\TMS-EEG_NMDA\anat\sub',ID{idx},'\'];
+            fileAN = 'tess_cortex_pial_low.mat';
+            anat_ind = load([pathAN,fileAN]);
+            
+            pathAN_default = ['F:\brainstorm_db\TMS-EEG_NMDA\anat\@default_subject\'];
+            anat_def = load([pathAN_default,fileAN]);
+            
+            % Reorder the leadfield matrix to match the EEGLAB data
+            eeglabChan = grandAverage.average.(site{sitex}).(tr{1}).label;
+            brainstormChan = {Channel.Name};
+            for i = 1:length(eeglabChan)
+                [~,chanIndex(i)] = ismember(lower(eeglabChan{i}),lower(brainstormChan));
+            end
+            LFM_ind = LFM.Gain(chanIndex,:);
+            
+            % Calculate the leadfields
+            LFM_ind_ave = ref_ave(LFM_ind); % With all channels
+            
+            %Computing the minimum norm solution with SVD truncated regularization
+            timeAxis = grandAverage.average.(site{sitex}).(tr{1}).time*1000;
+            [~, tp] = min(abs(timeAxis - toi(toix)));
+            
+            L_real = LFM_ind_ave; % Leadfield Matrix
+            data_correct_final = squeeze(grandAverage.average.(site{sitex}).(tr{1}).individual(idx,:,:)); % Averaged response
+            
+            % Calculate the MNE
+            trunD = 15;
+            tau = L_real*L_real';
+            [U_tau,S_tau,V_tau] = svd(tau,'econ');
+            S_inv = 1./diag(S_tau); S_inv(trunD:end) = 0;
+            tau_inv = V_tau*diag(S_inv)*U_tau';
+            MNE1 = L_real'*(tau_inv*data_correct_final(:,tp));
+            current_dens1 = sqrt(MNE1(1:3:end).^2+MNE1(2:3:end).^2 + MNE1(3:3:end).^2);
+            
+            % Convert to default anatomy
+            wmat = full(anat_ind.tess2tess_interp.Wmat);
+            current_dens2 = wmat*current_dens1;
+            current_all(:,idx) = current_dens2;
+            
+            if strcmp(plotData,'on')
+                % Plot the data
+                fig = figure;
+                set(gcf,'color','w');
+                
+                % Time series
+                subplot(1,4,1)
+                plot(timeAxis,data_correct_final,'k'); hold on;
+                curAxis = axis;
+                plot([0,0],[-50,50],'k--');
+                plot([timeAxis(tp),timeAxis(tp)],[-50,50],'r--');
+                set(gca,'xlim',[-10,250],'ylim',[curAxis(3),curAxis(4)],'box','off');
+                title([ID{idx},' ',site{sitex}]);
+                
+                % Topoplot
+                subplot(1,4,2)
+                plotStruc = [];
+                plotStruc.avg = data_correct_final(:,tp);
+                plotStruc.time = 1;
+                plotStruc.dimord = 'chan';
+                plotStruc.label = eeglabChan;
+                
+                cfg = [];
+                cfg.layout = 'easycapM11.mat';
+                cfg.comment = 'no';
+                cfg.interactive = 'no';
+                cfg.markersymbol = '.';
+                ft_topoplotER(cfg,plotStruc);
+                
+                % MNE
+                subplot(1,4,3)
+                hold on;
+                trisurf(anat_ind.Faces,anat_ind.Vertices(:,1),anat_ind.Vertices(:,2),anat_ind.Vertices(:,3),current_dens1,'facecolor','interp','edgealpha',0);
+                view([-90,90])
+                axis off;
+                
+                % MNE
+                subplot(1,4,4)
+                hold on;
+                trisurf(anat_def.Faces,anat_def.Vertices(:,1),anat_def.Vertices(:,2),anat_def.Vertices(:,3),current_dens2,'facecolor','interp','edgealpha',0);
+                view([-90,90])
+                axis off;
+                
+                set(fig,'position', [120 300 1500 520]);
+                
+            end
+            
+        end
+        
+        mne.(site{sitex}){toix} = current_all;
+        fprintf('%s %d ms complete\n',site{sitex},toi(toix));
+    end
+end
+
+mne.toi = toi;
+mne.anat_def = anat_def;
+
+save([pathIn,'MNE\mne_',useData],'mne');
+
+% fig = figure;
+% set(gcf,'color','w');
+% 
+% thresh = 0.8;
+% 
+% vertFull = anat_def.Vertices;
+% facesFull = anat_def.Faces;
+% curvData = anat_def.Curvature;
+% 
+% msh_curvature           = -curvData.';
+% mod_depth               = 0.1;
+% curvatureColorValues    = ((2*msh_curvature>0) - 1) * mod_depth * 128 + 127.5;
+% 
+% curvatureColorValues(find(curvatureColorValues == 63.5)) = 85;
+% curvatureColorValues(find(curvatureColorValues == 127.5)) = 130;
+% % keyboard
+% curvData = [curvatureColorValues;curvatureColorValues;curvatureColorValues].';
+% curvData = curvData/255;
+% % keyboard
+% 
+% hold on;
+% surfaceHandle = patch('Vertices',vertFull,'Faces',facesFull,'FaceVertexCdata',curvData,'FaceColor','interp','EdgeColor','none','FaceAlpha',1);
+% axis image;
+% axis off;
+% 
+% view([-90,90])
+% % h = camlight('left');
+% % h = camlight('right');
+% h = camlight;
+% material('dull');
+% 
+% faceVDataCurv = get(surfaceHandle,'FaceVertexCData'); % Here always keep!
+% 
+% cmap = hot(100).';
+% % cmap = cmap(:,end:-1:1);
+% 
+% FaceVData = faceVDataCurv;
+% data = mean(current_all,2);
+% 
+% cols = meshData2Colors(data, cmap, [], 1).';
+% 
+% % Set the colours to plot
+% maxVal = max(data);
+% inds = find(data>maxVal*thresh);
+% 
+% FaceVData(inds,:) = cols(inds,:);
+% 
+% set(surfaceHandle,'FaceVertexCData',FaceVData);
+% 
+% % Plot the TMS targets
+% sMri = load('F:\brainstorm_db\TMS-EEG_NMDA\anat\@default_subject\subjectimage_T1.mat');
+% pfc_mni = [-0.020, 0.035, 0.055]; % PFC
+% pfc_scs = cs_convert(sMri, 'mni', 'scs', pfc_mni);
+% ppc_mni = [-0.020, -0.065, 0.065]; % PPC
+% ppc_scs = cs_convert(sMri, 'mni', 'scs', ppc_mni);
+% [pfc_I,pfc_dist] = bst_nearest(anat_def.Vertices,pfc_scs, 1, 0);
+% [ppc_I,ppc_dist] = bst_nearest(anat_def.Vertices,ppc_scs, 1, 0);
+% 
+% if strcmp(site{sitex},'pfc')
+%     pfc_mni = [-0.020, 0.035, 0.055]; % PFC
+%     pfc_scs = cs_convert(sMri, 'mni', 'scs', pfc_mni);
+%     [pfc_I,pfc_dist] = bst_nearest(anat_def.Vertices,pfc_scs, 1, 0);
+%     plot3(anat_def.Vertices(pfc_I,1),anat_def.Vertices(pfc_I,2),anat_def.Vertices(pfc_I,3),'b.','MarkerSize',50);
+% elseif strcmp(site{sitex},'ppc')
+%     ppc_mni = [-0.020, -0.065, 0.065]; % PPC
+%     ppc_scs = cs_convert(sMri, 'mni', 'scs', ppc_mni);
+%     [ppc_I,ppc_dist] = bst_nearest(anat_def.Vertices,ppc_scs, 1, 0);
+%     plot3(anat_def.Vertices(ppfc_I,1),anat_def.Vertices(ppc_I,2),anat_def.Vertices(ppc_I,3),'r.','MarkerSize',50);
+% end

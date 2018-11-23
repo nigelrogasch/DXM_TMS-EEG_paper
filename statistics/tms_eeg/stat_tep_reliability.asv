@@ -1,0 +1,967 @@
+%##### COMPARE THE REPRODUCIBILITY OF BASELINE TEPs WITHIN AND BETWEEN SUBJECTS #####
+
+% This script compares the mean absolute difference in baseline TEPs (averaged
+% across all time and space, and over time and space separately) between
+% within-individual comparisons (e.g. S1 week 1 vs S1 week 2) and
+% between-individual comparisons (e.g. S1 week 1 vs S2 week 2 etc.). Data
+% are comp
+% Inputs are final cleaned EEGLAB data files
+
+% Author: Nigel Rogasch, Monash University
+
+clear; close all; clc;
+
+% Experimental variables
+ID = {'001';'002';'004';'005';'006';'007';'008';'009';'010';'011';'012';'013';'014';'015'};
+con = {'C1';'C2'}; % two experimental sessions seperated by at least a week
+site = {'pfc';'ppc'}; % two different stimulation sites
+tr = {'t0';'t1'}; % two different time points within a day - t0 = baseline, t1 = following drug/placebo
+useData = 'sound_final'; % 'ica_final' | 'sound_final'
+scaleMethod = 'none'; % 'scale' | 'zscore' |'none' : 'scale' uses an iterative scale proceduce designed by Ben. 'zscore' takes the z score (which will alter the baseline of the measure). 'none' uses the raw data.
+scaleFreq = 'all'; % 'all' | 'once' : required if scaleMethod = 'scale'. Scale signals for each comparison ('all') or only for the within subject comparison ('once')
+
+pathDef = 'I:\nmda_tms_eeg\';
+
+% Create input path
+if strcmp(useData,'ica_final')
+    pathIn = [pathDef,'CLEAN_ICA\'];
+elseif strcmp(useData,'sound_final')
+    pathIn = [pathDef,'CLEAN_SOUND\'];
+end
+
+% Other prefixes and suffixes
+tms = 'tms';
+u = '_';
+
+% Time range to compare signals (in ms)
+timeRange = [15,500];
+
+% Load data
+load([pathIn,useData]);
+
+% Find the relevant time points
+[~,t1] = min(abs(time-timeRange(1,1)));
+[~,t2] = min(abs(time-timeRange(1,2)));
+
+% ===== RUN ANALYSIS SCALING OVER TIME SERIES =====
+
+if strcmp(scaleMethod,'zscore')
+    % Convert time series to z-scores
+    for idx = 1:size(ID,1)
+        
+        % Create the correct identifier for the ID
+        id = ['S',ID{idx,1}];
+        
+        for sitex = 1:size(site,1)
+            for conx = 1:size(con,1)
+                
+                % Loop over channels
+                for chanx = 1:size(data_FINAL.(id).(con{conx}).(site{sitex}).t0,1)
+                    zTimeSeriesT.(con{conx}).(site{sitex})(chanx,:,idx) = zscore(data_FINAL.(id).(con{conx}).(site{sitex}).t0(chanx,t1:t2));
+                end
+            end
+        end
+    end
+elseif strcmp(scaleMethod,'none')
+        % Convert time series to z-scores
+    for idx = 1:size(ID,1)
+        
+        % Create the correct identifier for the ID
+        id = ['S',ID{idx,1}];
+        
+        for sitex = 1:size(site,1)
+            for conx = 1:size(con,1)
+                
+                % Loop over channels
+                for chanx = 1:size(data_FINAL.(id).(con{conx}).(site{sitex}).t0,1)
+                    zTimeSeriesT.(con{conx}).(site{sitex})(chanx,:,idx) = data_FINAL.(id).(con{conx}).(site{sitex}).t0(chanx,t1:t2);
+                end
+            end
+        end
+    end
+    
+elseif strcmp(scaleMethod,'scale')
+    % Convert time series of C2 to scaled values relative to C1
+    for idx = 1:size(ID,1)
+        
+        % Create the correct identifier for the ID
+        id = ['S',ID{idx,1}];
+        
+        for sitex = 1:size(site,1)
+            
+            % Loop over channels
+            for chanx = 1:size(data_FINAL.(id).C1.(site{sitex}).t0,1)
+                zTimeSeriesT.C1.(site{sitex})(chanx,:,idx) = data_FINAL.(id).C1.(site{sitex}).t0(chanx,t1:t2);
+                f_dist = @(eta) sum(abs( data_FINAL.(id).C2.(site{sitex}).t0(chanx,t1:t2)*eta-data_FINAL.(id).C1.(site{sitex}).t0(chanx,t1:t2)));
+                eta_opt.C2.(site{sitex})(chanx,idx) = fminsearch(f_dist, 1);
+                rho.C2.(site{sitex})(chanx,idx) = f_dist(eta_opt.C2.(site{sitex})(chanx,idx));
+                zTimeSeriesT.C2.(site{sitex})(chanx,:,idx) = data_FINAL.(id).C2.(site{sitex}).t0(chanx,t1:t2).*eta_opt.C2.(site{sitex})(chanx,idx);
+            end
+        end
+    end
+end
+
+% Calculate absolute difference matrix for each individual
+for idx = 1:size(ID,1)
+    for sitex = 1:size(site,1)
+        zDiffT.(site{sitex})(:,:,idx) = abs(zTimeSeriesT.C1.(site{sitex})(:,:,idx) - zTimeSeriesT.C2.(site{sitex})(:,:,idx));
+    end
+end
+
+
+% Calculate the difference matrix between C1 and C2 for all subject pairs
+
+if strcmp(scaleMethod,'scale') && strcmp(scaleFreq,'all')
+    for sitex = 1:size(site,1)
+        
+        % Calculate the absolute difference and sum across dimensions
+        for i = 1:size(ID,1)
+            for j = 1:size(ID,1)
+                
+                % Create the correct identifier for the ID
+                id1 = ['S',ID{i,1}];
+                id2 = ['S',ID{j,1}];
+                
+                % Loop over channels
+                zTimeSeriesA = [];
+                zTimeSeriesB = [];
+                for chanx = 1:size(data_FINAL.(id1).C1.(site{sitex}).t0,1)
+                    zTimeSeriesA(chanx,:) = data_FINAL.(id1).C1.(site{sitex}).t0(chanx,t1:t2);
+                    f_dist = @(eta) sum(abs( data_FINAL.(id2).C2.(site{sitex}).t0(chanx,t1:t2)*eta-data_FINAL.(id1).C1.(site{sitex}).t0(chanx,t1:t2)));
+                    eta_optA = fminsearch(f_dist, 1);
+                    rhoA = f_dist(eta_optA);
+                    zTimeSeriesB(chanx,:) = data_FINAL.(id2).C2.(site{sitex}).t0(chanx,t1:t2).*eta_optA;
+                end
+                
+                zDiffTemp = abs(zTimeSeriesA - zTimeSeriesB);
+                zDiffAllT.(site{sitex})(i,j) = mean(zDiffTemp(:));
+            end
+        end
+        
+    end
+else
+    for sitex = 1:size(site,1)
+        
+        % Calculate the absolute difference and sum across dimensions
+        for i = 1:size(ID,1)
+            for j = 1:size(ID,1)
+                zDiffTemp = abs(zTimeSeriesT.C1.(site{sitex})(:,:,i) - zTimeSeriesT.C2.(site{sitex})(:,:,j));
+                zDiffAllT.(site{sitex})(i,j) = mean(zDiffTemp(:));
+            end
+        end
+        
+    end
+end
+
+% Compare the diagonal with upper and lower triangles
+for sitex = 1:size(site,1)
+    
+    matchAllT.(site{sitex}) = diag(zDiffAllT.(site{sitex}));
+    triUpAllT.(site{sitex}) = zDiffAllT.(site{sitex})(triu(zDiffAllT.(site{sitex}),1)~=0);
+    triLowAllT.(site{sitex}) = zDiffAllT.(site{sitex})(tril(zDiffAllT.(site{sitex}),-1)~=0);
+    
+    [StatAllT.(site{sitex}).uP,~,StatAllT.(site{sitex}).uS] = ranksum(matchAllT.(site{sitex}),triUpAllT.(site{sitex}));
+    [StatAllT.(site{sitex}).lP,~,StatAllT.(site{sitex}).lS] = ranksum(matchAllT.(site{sitex}),triLowAllT.(site{sitex}));
+end
+
+N = size(zDiffAllT.(site{sitex}),1);
+% Calculate the accuracy of identification
+for sitex = 1:size(site,1)
+    sortOut = [];
+    accuracyOut = [];
+    for i = 1:N
+        data = zDiffAllT.(site{sitex})(i,:);
+        data_sorted = sort(data);
+        [~, rnk] = ismember(data,data_sorted);
+        sortOut(i) = rnk(i);
+    end
+    accuracyOut = sum(sortOut == 1)./length(sortOut);
+    
+    sortOutAllT.(site{sitex}).C1 = sortOut;
+    accuracyAllT.(site{sitex}).C1 = accuracyOut;
+    
+    sortOut = [];
+    accuracyOut = [];
+    for i = 1:N
+        data = zDiffAllT.(site{sitex})(:,i);
+        data_sorted = sort(data);
+        [~, rnk] = ismember(data,data_sorted);
+        sortOut(i) = rnk(i);
+    end
+    accuracyOut = sum(sortOut == 1)./length(sortOut);
+    
+    sortOutAllT.(site{sitex}).C2 = sortOut;
+    accuracyAllT.(site{sitex}).C2 = accuracyOut;
+end
+
+% % Calculate the difference matrix between C1 and C2 for all subject pairs
+% % averaged across electrode
+% 
+% if strcmp(scaleMethod,'zscore')
+%     % Convert time series to z-scores
+%     for idx = 1:size(ID,1)
+%         
+%         % Create the correct identifier for the ID
+%         id = ['S',ID{idx,1}];
+%         
+%         for sitex = 1:size(site,1)
+%             for conx = 1:size(con,1)
+%                 
+%                 % Loop over channels
+%                 for chanx = 1:size(data_FINAL.(id).(con{conx}).(site{sitex}).t0,1)
+%                     zTimeSeriesChan.(con{conx}).(site{sitex})(chanx,:,idx) = zscore(data_FINAL.(id).(con{conx}).(site{sitex}).t0(chanx,t1:t2));
+%                 end
+%             end
+%         end
+%     end
+%     
+% elseif strcmp(scaleMethod,'scale')
+%     % Convert time series of C2 to scaled values relative to C1
+%     for idx = 1:size(ID,1)
+%         
+%         % Create the correct identifier for the ID
+%         id = ['S',ID{idx,1}];
+%         
+%         for sitex = 1:size(site,1)
+%             
+%             % Loop over channels
+%             for chanx = 1:size(data_FINAL.(id).C1.(site{sitex}).t0,1)
+%                 zTimeSeriesChan.C1.(site{sitex})(chanx,:,idx) = data_FINAL.(id).C1.(site{sitex}).t0(chanx,t1:t2);
+%                 f_dist = @(eta) sum(abs( data_FINAL.(id).C2.(site{sitex}).t0(chanx,t1:t2)*eta-data_FINAL.(id).C1.(site{sitex}).t0(chanx,t1:t2)));
+%                 eta_optB = fminsearch(f_dist, 1);
+%                 rhoB = f_dist(eta_optB);
+%                 zTimeSeriesChan.C2.(site{sitex})(chanx,:,idx) = data_FINAL.(id).C2.(site{sitex}).t0(chanx,t1:t2).*eta_optB;
+%             end
+%         end
+%     end
+% end
+
+if strcmp(scaleMethod,'scale') && strcmp(scaleFreq,'all')
+    for sitex = 1:size(site,1)
+        
+        % Calculate the absolute difference and sum across dimensions
+        for i = 1:size(ID,1)
+            for j = 1:size(ID,1)
+                
+                % Create the correct identifier for the ID
+                id1 = ['S',ID{i,1}];
+                id2 = ['S',ID{j,1}];
+                
+                % Loop over channels
+                zTimeSeriesA = [];
+                zTimeSeriesB = [];
+                for chanx = 1:size(data_FINAL.(id1).C1.(site{sitex}).t0,1)
+                    zTimeSeriesA(chanx,:) = data_FINAL.(id1).C1.(site{sitex}).t0(chanx,t1:t2);
+                    f_dist = @(eta) sum(abs( data_FINAL.(id2).C2.(site{sitex}).t0(chanx,t1:t2)*eta-data_FINAL.(id1).C1.(site{sitex}).t0(chanx,t1:t2)));
+                    eta_optA = fminsearch(f_dist, 1);
+                    rhoA = f_dist(eta_optA);
+                    zTimeSeriesB(chanx,:) = data_FINAL.(id2).C2.(site{sitex}).t0(chanx,t1:t2).*eta_opt;
+                end
+                
+                zDiffTemp = abs(zTimeSeriesA - zTimeSeriesB);
+                zDiffChan.(site{sitex})(i,j,:) = mean(zDiffTemp,2);
+            end
+        end
+        
+    end
+else  
+    for sitex = 1:size(site,1)
+        
+        % Calculate the absolute difference and sum across dimensions
+        for i = 1:size(ID,1)
+            for j = 1:size(ID,1)
+                zDiffTemp = abs(zTimeSeriesT.C1.(site{sitex})(:,:,i) - zTimeSeriesT.C2.(site{sitex})(:,:,j));
+                zDiffChan.(site{sitex})(i,j,:) = mean(zDiffTemp,2);
+            end
+        end
+        
+    end
+end
+
+% Compare the diagonal with upper and lower triangles for all channels
+for sitex = 1:size(site,1)
+    for chanx = 1:size(zTimeSeriesT.C1.pfc,1)
+        
+        tempIn = zDiffChan.(site{sitex})(:,:,chanx);
+        
+        match.(site{sitex}) = diag(tempIn);
+        triUp.(site{sitex}) = tempIn(triu(tempIn,1)~=0);
+        triLow.(site{sitex}) = tempIn(tril(tempIn,-1)~=0);
+        
+        [StatChan.(site{sitex}).uP(chanx,1),~,StatChan.(site{sitex}).uS(chanx,1)] = ranksum(match.(site{sitex}),triUp.(site{sitex}));
+        [StatChan.(site{sitex}).lP(chanx,1),~,StatChan.(site{sitex}).lS(chanx,1)] = ranksum(match.(site{sitex}),triLow.(site{sitex}));
+        
+        % Calculate U values
+        uChan.(site{sitex}).uP(chanx,1) = StatChan.(site{sitex}).uS(chanx,1).ranksum-((length(match.(site{sitex})).*(length(match.(site{sitex}))+1))./2);
+        uChan.(site{sitex}).lP(chanx,1) = StatChan.(site{sitex}).lS(chanx,1).ranksum-((length(match.(site{sitex})).*(length(match.(site{sitex}))+1))./2);
+        
+        % Calculate Rho values
+        rhoChan.(site{sitex}).uP(chanx,1) = uChan.(site{sitex}).uP(chanx,1)./(length(match.(site{sitex})).*length(triUp.(site{sitex})));
+        rhoChan.(site{sitex}).lP(chanx,1) = uChan.(site{sitex}).lP(chanx,1)./(length(match.(site{sitex})).*length(triLow.(site{sitex})));
+        
+    end
+end
+
+% Calculate the accuracy of identification
+for sitex = 1:size(site,1)
+    for chanx = 1:size(zTimeSeriesT.C1.pfc,1)
+        sortOut = [];
+        accuracyOut = [];
+        for i = 1:N
+            data = zDiffChan.(site{sitex})(i,:,chanx);
+            data_sorted = sort(data);
+            [~, rnk] = ismember(data,data_sorted);
+            sortOut(i) = rnk(i);
+        end
+        accuracyOut = sum(sortOut == 1)./length(sortOut);
+
+        sortOutChan.(site{sitex}).C1(chanx,:) = sortOut;
+        accuracyChan.(site{sitex}).C1(chanx,:) = accuracyOut;
+
+        sortOut = [];
+        accuracyOut = [];
+        for i = 1:N
+            data = zDiffChan.(site{sitex})(:,i,chanx);
+            data_sorted = sort(data);
+            [~, rnk] = ismember(data,data_sorted);
+            sortOut(i) = rnk(i);
+        end
+        accuracyOut = sum(sortOut == 1)./length(sortOut);
+    
+        sortOutChan.(site{sitex}).C2(chanx,:) = sortOut;
+        accuracyChan.(site{sitex}).C2(chanx,:) = accuracyOut;
+    end
+end
+
+% ===== RUN ANALYSIS SCALING OVER ELECTRODES =====
+
+if strcmp(scaleMethod,'zscore')
+    % Convert time series to z-scores
+    for idx = 1:size(ID,1)
+        
+        % Create the correct identifier for the ID
+        id = ['S',ID{idx,1}];
+        
+        for sitex = 1:size(site,1)
+            for conx = 1:size(con,1)
+                
+                % Loop over channels
+                for timex = 1:size(data_FINAL.(id).(con{conx}).(site{sitex}).t0,2)
+                    zTimeSeriesE.(con{conx}).(site{sitex})(:,timex,idx) = zscore(data_FINAL.(id).(con{conx}).(site{sitex}).t0(:,timex));
+                end
+            end
+        end
+    end
+    
+elseif strcmp(scaleMethod,'none')
+        for idx = 1:size(ID,1)
+        
+        % Create the correct identifier for the ID
+        id = ['S',ID{idx,1}];
+        
+        for sitex = 1:size(site,1)
+            for conx = 1:size(con,1)
+                
+                % Loop over channels
+                for timex = 1:size(data_FINAL.(id).(con{conx}).(site{sitex}).t0,2)
+                    zTimeSeriesE.(con{conx}).(site{sitex})(:,timex,idx) = data_FINAL.(id).(con{conx}).(site{sitex}).t0(:,timex);
+                end
+            end
+        end
+    end
+    
+elseif strcmp(scaleMethod,'scale')
+    % Convert time series of C2 to scaled values relative to C1
+    for idx = 1:size(ID,1)
+        
+        % Create the correct identifier for the ID
+        id = ['S',ID{idx,1}];
+        
+        for sitex = 1:size(site,1)
+            
+            % Loop over channels
+            for timex = 1:size(data_FINAL.(id).C1.(site{sitex}).t0,2)
+                zTimeSeriesE.C1.(site{sitex})(:,timex,idx) = data_FINAL.(id).C1.(site{sitex}).t0(:,timex);
+                f_dist = @(eta) sum(abs( data_FINAL.(id).C2.(site{sitex}).t0(:,timex)*eta-data_FINAL.(id).C1.(site{sitex}).t0(:,timex)));
+                eta_optC = fminsearch(f_dist, 1);
+                rhoC = f_dist(eta_optC);
+                zTimeSeriesE.C2.(site{sitex})(:,timex,idx) = data_FINAL.(id).C2.(site{sitex}).t0(:,timex).*eta_optC;
+            end
+        end
+    end
+end
+
+% Calculate absolute difference matrix for each individual
+for idx = 1:size(ID,1)
+    for sitex = 1:size(site,1)
+        zDiffE.(site{sitex})(:,:,idx) = abs(zTimeSeriesE.C1.(site{sitex})(:,t1:t2,idx) - zTimeSeriesE.C2.(site{sitex})(:,t1:t2,idx));
+    end
+end
+
+
+% Calculate the difference matrix between C1 and C2 for all subject pairs
+
+if strcmp(scaleMethod,'scale') && strcmp(scaleFreq,'all')
+    for sitex = 1:size(site,1)
+        
+        % Calculate the absolute difference and sum across dimensions
+        for i = 1:size(ID,1)
+            for j = 1:size(ID,1)
+                
+                % Create the correct identifier for the ID
+                id1 = ['S',ID{i,1}];
+                id2 = ['S',ID{j,1}];
+                
+                % Loop over channels
+                zTimeSeriesA = [];
+                zTimeSeriesB = [];
+                for timex = 1:size(data_FINAL.(id1).C1.(site{sitex}).t0,2)
+                    zTimeSeriesA(:,timex) = data_FINAL.(id1).C1.(site{sitex}).t0(:,timex);
+                    f_dist = @(eta) sum(abs( data_FINAL.(id2).C2.(site{sitex}).t0(:,timex)*eta-data_FINAL.(id1).C1.(site{sitex}).t0(:,timex)));
+                    eta_optA = fminsearch(f_dist, 1);
+                    rhoA = f_dist(eta_optA);
+                    zTimeSeriesB(:,timex) = data_FINAL.(id2).C2.(site{sitex}).t0(:,timex).*eta_optA;
+                end
+                
+                zDiffTemp = abs(zTimeSeriesA(:,t1:t2) - zTimeSeriesB(:,t1:t2));
+                zDiffAllE.(site{sitex})(i,j) = mean(zDiffTemp(:));
+            end
+        end
+        
+    end
+else
+    for sitex = 1:size(site,1)
+        
+        % Calculate the absolute difference and sum across dimensions
+        for i = 1:size(ID,1)
+            for j = 1:size(ID,1)
+                zDiffTemp = abs(zTimeSeriesE.C1.(site{sitex})(:,t1:t2,i) - zTimeSeriesE.C2.(site{sitex})(:,t1:t2,j));
+                zDiffAllE.(site{sitex})(i,j) = mean(zDiffTemp(:));
+            end
+        end
+        
+    end
+end
+
+% Compare the diagonal with upper and lower triangles
+for sitex = 1:size(site,1)
+    
+    matchAllE.(site{sitex}) = diag(zDiffAllE.(site{sitex}));
+    triUpAllE.(site{sitex}) = zDiffAllE.(site{sitex})(triu(zDiffAllE.(site{sitex}),1)~=0);
+    triLowAllE.(site{sitex}) = zDiffAllE.(site{sitex})(tril(zDiffAllE.(site{sitex}),-1)~=0);
+    
+    [StatAllE.(site{sitex}).uP,~,StatAllE.(site{sitex}).uS] = ranksum(matchAllE.(site{sitex}),triUpAllE.(site{sitex}));
+    [StatAllE.(site{sitex}).lP,~,StatAllE.(site{sitex}).lS] = ranksum(matchAllE.(site{sitex}),triLowAllE.(site{sitex}));
+end
+
+% Calculate the accuracy of identification
+for sitex = 1:size(site,1)
+    sortOut = [];
+    accuracyOut = [];
+    for i = 1:N
+        data = zDiffAllE.(site{sitex})(i,:);
+        data_sorted = sort(data);
+        [~, rnk] = ismember(data,data_sorted);
+        sortOut(i) = rnk(i);
+    end
+    accuracyOut = sum(sortOut == 1)./length(sortOut);
+    
+    sortOutAllE.(site{sitex}).C1 = sortOut;
+    accuracyAllE.(site{sitex}).C1 = accuracyOut;
+    
+    sortOut = [];
+    accuracyOut = [];
+    for i = 1:N
+        data = zDiffAllE.(site{sitex})(:,i);
+        data_sorted = sort(data);
+        [~, rnk] = ismember(data,data_sorted);
+        sortOut(i) = rnk(i);
+    end
+    accuracyOut = sum(sortOut == 1)./length(sortOut);
+    
+    sortOutAllE.(site{sitex}).C2 = sortOut;
+    accuracyAllE.(site{sitex}).C2 = accuracyOut;
+end
+
+% Calculate the difference matrix between C1 and C2 for all subject pairs
+% averaged across time points
+if strcmp(scaleMethod,'scale') && strcmp(scaleFreq,'all')
+    for sitex = 1:size(site,1)
+        
+        % Calculate the absolute difference and sum across dimensions
+        for i = 1:size(ID,1)
+            for j = 1:size(ID,1)
+                
+                % Create the correct identifier for the ID
+                id1 = ['S',ID{i,1}];
+                id2 = ['S',ID{j,1}];
+                
+                % Loop over channels
+                zTimeSeriesA = [];
+                zTimeSeriesB = [];
+                for timex = 1:size(data_FINAL.(id1).C1.(site{sitex}).t0,2)
+                    zTimeSeriesA(:,timex) = data_FINAL.(id1).C1.(site{sitex}).t0(:,timex);
+                    f_dist = @(eta) sum(abs( data_FINAL.(id2).C2.(site{sitex}).t0(:,timex)*eta-data_FINAL.(id1).C1.(site{sitex}).t0(:,timex)));
+                    eta_optA = fminsearch(f_dist, 1);
+                    rhoA = f_dist(eta_optA);
+                    zTimeSeriesB(:,timex) = data_FINAL.(id2).C2.(site{sitex}).t0(:,timex).*eta_opt;
+                end
+                
+                zDiffTemp = abs(zTimeSeriesA - zTimeSeriesB);
+                zDiffTime.(site{sitex})(i,j,:) = mean(zDiffTemp,1);
+            end
+        end
+        
+    end
+else
+    for sitex = 1:size(site,1)
+        
+        % Calculate the absolute difference and sum across dimensions
+        for i = 1:size(ID,1)
+            for j = 1:size(ID,1)
+                zDiffTemp = abs(zTimeSeriesE.C1.(site{sitex})(:,:,i) - zTimeSeriesE.C2.(site{sitex})(:,:,j));
+                zDiffTime.(site{sitex})(i,j,:) = mean(zDiffTemp,1);
+            end
+        end
+        
+    end
+end
+
+% Compare the diagonal with upper and lower triangles for all time points
+for sitex = 1:size(site,1)
+    for timex = 1:length(time)
+        
+        tempIn = zDiffTime.(site{sitex})(:,:,timex);
+        
+        match.(site{sitex}) = diag(tempIn);
+        triUp.(site{sitex}) = tempIn(triu(tempIn,1)~=0);
+        triLow.(site{sitex}) = tempIn(tril(tempIn,-1)~=0);
+        
+        [StatTime.(site{sitex}).uP(timex,1),~,StatTime.(site{sitex}).uS(timex,1)] = ranksum(match.(site{sitex}),triUp.(site{sitex}));
+        [StatTime.(site{sitex}).lP(timex,1),~,StatTime.(site{sitex}).lS(timex,1)] = ranksum(match.(site{sitex}),triLow.(site{sitex}));
+        
+        % Calculate U values
+        uTime.(site{sitex}).uP(timex,1) = StatTime.(site{sitex}).uS(timex,1).ranksum-((length(match.(site{sitex})).*(length(match.(site{sitex}))+1))./2);
+        uTime.(site{sitex}).lP(timex,1) = StatTime.(site{sitex}).lS(timex,1).ranksum-((length(match.(site{sitex})).*(length(match.(site{sitex}))+1))./2);
+        
+        % Calculate Rho values
+        rhoTime.(site{sitex}).uP(timex,1) = uTime.(site{sitex}).uP(timex,1)./(length(match.(site{sitex})).*length(triUp.(site{sitex})));
+        rhoTime.(site{sitex}).lP(timex,1) = uTime.(site{sitex}).lP(timex,1)./(length(match.(site{sitex})).*length(triLow.(site{sitex})));
+        
+    end
+end
+
+for sitex = 1:size(site,1)
+    for timex = 1:length(time)
+        sortOut = [];
+        accuracyOut = [];
+        for i = 1:N
+            data = zDiffTime.(site{sitex})(i,:,timex);
+            data_sorted = sort(data);
+            [~, rnk] = ismember(data,data_sorted);
+            sortOut(i) = rnk(i);
+        end
+        accuracyOut = sum(sortOut == 1)./length(sortOut);
+
+        sortOutTime.(site{sitex}).C1(timex,:) = sortOut;
+        accuracyTime.(site{sitex}).C1(timex,:) = accuracyOut;
+
+        sortOut = [];
+        accuracyOut = [];
+        for i = 1:N
+            data = zDiffTime.(site{sitex})(:,i,timex);
+            data_sorted = sort(data);
+            [~, rnk] = ismember(data,data_sorted);
+            sortOut(i) = rnk(i);
+        end
+        accuracyOut = sum(sortOut == 1)./length(sortOut);
+    
+        sortOutTime.(site{sitex}).C2(timex,:) = sortOut;
+        accuracyTime.(site{sitex}).C2(timex,:) = accuracyOut;
+    end
+end
+
+% ===== SAVE THE OUTPUTS =====
+save([pathIn,'SHAPE',filesep,useData,'_output_shape_',scaleMethod,'_',num2str(timeRange(1,1)),'_',num2str(timeRange(1,2))],'zDiffAllT','zDiffAllE','zDiffTime','zDiffChan','accuracyAllT','accuracyAllE','accuracyTime','accuracyChan');
+
+% ===== PLOT ANALYSIS =====
+% 
+% % Find the max zscore for each individual
+% for sitex = 1:size(site,1)
+%     
+%     for idx = 1:size(zDiff.pfc,3)
+%         maxInd(idx,:) = max(max(zDiff.(site{sitex})(:,:,idx)));
+%     end
+%     
+%     zMax.(site{sitex}) = max(maxInd);
+%     
+% end
+% 
+% %Plot the individual data
+% for sitex = 1:size(site,1)
+%     fig = figure;
+%     set(gcf,'color','w');
+%     
+%     for idx = 1:size(zDiff.pfc,3)
+%         subplot(3,5,idx)
+% 
+%         % Plot the matrix
+%         imagesc(time(t1):time(t2),1:size(zDiff.pfc,1),zDiff.(site{sitex})(:,:,idx));
+%         
+%         % Adjust the settings
+%         caxis([0,zMax.(site{sitex})]);
+%         title(['S',ID{idx,1}]);
+%         xlabel('Time (ms)');
+%         ylabel('Channels');
+%         colorbar;
+% 
+%     end
+% end
+% 
+% Plot comparisons between matched and non-matched data
+
+% Load additional data for topoplots 
+addpath ('C:\Users\Nigel\Desktop\fieldtrip-20170815');
+ft_defaults;
+
+load([pathDef,'CLEAN_ICA1\grandAverage_N14.mat']);
+labelIn = grandAverage.C1.pfc.T0.label;
+
+for sitex = 1:size(site,1)
+    
+    fig = figure;
+    set(gcf,'color','w');
+    
+    subplot(2,4,1)
+    
+    % Plot the matrix for scaled across time
+    imagesc(zDiffAllT.(site{sitex}));
+    
+    title([site{sitex},' \Delta shape']);
+    xlabel('Subjects - C1');
+    ylabel('Subjects - C2');
+    colorbar;
+    
+    % Plot the differences using violin plot
+    subplot(2,4,2)
+    dataCell = {matchAllT.(site{sitex}),triUpAllT.(site{sitex}),triLowAllT.(site{sitex})};
+    BF_JitteredParallelScatter(dataCell,1,1,0);
+    
+    title([site{sitex},' \Delta SD']);
+    if StatAllT.(site{sitex}).uP,3 < 0.001;
+        labelA = 'n.m. up$p<0.001';   
+    else
+        labelA = ['n.m. up$p=',num2str(round(StatAllT.(site{sitex}).uP,3))];
+    end
+    if StatAllT.(site{sitex}).lP,3 < 0.001; 
+        labelB = 'n.m. low$p<0.001'; 
+    else
+        labelB = ['n.m. low$p=',num2str(round(StatAllT.(site{sitex}).lP,3))];
+    end
+        
+    labelA = strrep(labelA,'$','\newline');
+    labelB = strrep(labelB,'$','\newline');
+    set(gca,'xlim',[0.5,3.5],'xtick',1:3,'xticklabel',{'match',labelA,labelB});
+    ylabel('Mean \Delta');
+    
+    % Plot topoplot for upper
+    subplot(2,4,3)
+    
+    % Settings for topoplot
+    plotStruc = [];
+    plotStruc.avg = rhoChan.(site{sitex}).uP;
+    plotStruc.time = 1;
+    plotStruc.dimord = 'chan_time';
+    plotStruc.label = labelIn;
+
+    % Check if any channels are p < 0.05 and plot with stars
+    cfg = [];
+    statmask = StatChan.(site{sitex}).uP < 0.05;
+    if sum(statmask) > 0
+        cfg.highlight = 'on';
+        cfg.highlightchannel   =  plotStruc.label(statmask);
+        cfg.highlightsymbol    = '*';
+        cfg.highlightcolor = [0.99 0.99 0.99];
+        cfg.highlightsize = 10;
+    end
+
+    cfg.layout = 'easycapM11.mat'; 
+    cfg.comment = 'no';
+    cfg.interactive = 'no';
+    ft_topoplotER(cfg,plotStruc);
+    colorbar;
+    
+    title('match v non-match up')
+    
+    % Plot topoplot for lower
+    subplot(2,4,4)
+    
+    % Settings for topoplot
+    plotStruc = [];
+    plotStruc.avg = rhoChan.(site{sitex}).lP;
+    plotStruc.time = 1;
+    plotStruc.dimord = 'chan_time';
+    plotStruc.label = labelIn;
+
+    % Check if any channels are p < 0.05 and plot with stars
+    cfg = [];
+    statmask = StatChan.(site{sitex}).lP < 0.05;
+    if sum(statmask) > 0
+        cfg.highlight = 'on';
+        cfg.highlightchannel   =  plotStruc.label(statmask);
+        cfg.highlightsymbol    = '*';
+        cfg.highlightcolor = [0.99 0.99 0.99];
+        cfg.highlightsize = 10;
+    end
+
+    cfg.layout = 'easycapM11.mat'; 
+    cfg.comment = 'no';
+    cfg.interactive = 'no';
+    ft_topoplotER(cfg,plotStruc);
+    colorbar;
+    
+    title('match v non-match low')
+    
+    subplot(2,4,5)
+    
+    % Plot the matrix for scaled across electrode
+    imagesc(zDiffAllE.(site{sitex}));
+    
+    title([site{sitex},' \Delta shape']);
+    xlabel('Subjects - C1');
+    ylabel('Subjects - C2');
+    colorbar;
+    
+    % Plot the differences using violin plot
+    subplot(2,4,6)
+    dataCell = {matchAllE.(site{sitex}),triUpAllE.(site{sitex}),triLowAllE.(site{sitex})};
+    BF_JitteredParallelScatter(dataCell,1,1,0);
+    
+    title([site{sitex},' \Delta SD']);
+    if StatAllE.(site{sitex}).uP,3 < 0.001;
+        labelA = 'n.m. up$p<0.001';   
+    else
+        labelA = ['n.m. up$p=',num2str(round(StatAllE.(site{sitex}).uP,3))];
+    end
+    if StatAllE.(site{sitex}).lP,3 < 0.001; 
+        labelB = 'n.m. low$p<0.001'; 
+    else
+        labelB = ['n.m. low$p=',num2str(round(StatAllE.(site{sitex}).lP,3))];
+    end
+        
+    labelA = strrep(labelA,'$','\newline');
+    labelB = strrep(labelB,'$','\newline');
+    set(gca,'xlim',[0.5,3.5],'xtick',1:3,'xticklabel',{'match',labelA,labelB});
+    ylabel('Mean \Delta');
+    
+    % Plot time series for upper
+    subplot(2,4,7)
+    
+    plot(time,rhoTime.(site{sitex}).uP,'linewidth',2); hold on;
+    plot([time(1,1),time(1,end)],[0.5,0.5],'k--');
+    
+    tempLog = zeros(1,length(time));
+    tempLog(StatTime.(site{sitex}).uP >= 0.05) = nan;
+    
+    plot(time,tempLog,'r','linewidth',3);
+    
+    set(gca,'box','off','xlim',[-100,1000],'ylim',[0,1])
+    title('match v non-match up')
+    xlabel('Time (ms)')
+    ylabel('Rho')
+    
+    % Plot time series for upper
+    subplot(2,4,8)
+    
+    plot(time,rhoTime.(site{sitex}).lP,'linewidth',2); hold on;
+    plot([time(1,1),time(1,end)],[0.5,0.5],'k--');
+    
+    tempLog = zeros(1,length(time));
+    tempLog(StatTime.(site{sitex}).lP >= 0.05) = nan;
+    
+    plot(time,tempLog,'r','linewidth',3);
+    
+    set(gca,'box','off','xlim',[-100,1000],'ylim',[0,1])
+    title('match v non-match low')
+    xlabel('Time (ms)')
+    ylabel('Rho')
+    
+end
+
+% Plot accuracy results
+for sitex = 1:size(site,1)
+    
+    fig = figure;
+    set(gcf,'color','w');
+    
+    subplot(2,3,1)
+    
+    % Plot the matrix for scaled across time
+    bar([1,2],[accuracyAllT.(site{sitex}).C1,accuracyAllT.(site{sitex}).C2]); hold on;
+    plot([0,3],[1/N,1/N],'r--');
+    
+    title([site{sitex},' \Delta shape']);
+    set(gca,'xticklabel',{'C1','C2'},'xlim',[0.5,2.5],'xtick',1:2,'ylim',[0,1]);
+    ylabel('Accuracy');
+      
+    % Plot topoplot for upper
+    subplot(2,3,2)
+    
+    % Settings for topoplot
+    plotStruc = [];
+    plotStruc.avg = accuracyChan.(site{sitex}).C1;
+    plotStruc.time = 1;
+    plotStruc.dimord = 'chan_time';
+    plotStruc.label = labelIn;
+
+    % Check if any channels are p < 0.05 and plot with stars
+    cfg = [];
+    cfg.layout = 'easycapM11.mat'; 
+    cfg.comment = 'no';
+    cfg.interactive = 'no';
+    ft_topoplotER(cfg,plotStruc);
+    colorbar;
+    
+    title('C1')
+    
+    % Plot topoplot for lower
+    subplot(2,3,3)
+    
+    % Settings for topoplot
+    plotStruc = [];
+    plotStruc.avg = accuracyChan.(site{sitex}).C2;
+    plotStruc.time = 1;
+    plotStruc.dimord = 'chan_time';
+    plotStruc.label = labelIn;
+
+    % Check if any channels are p < 0.05 and plot with stars
+    cfg = [];
+    cfg.layout = 'easycapM11.mat'; 
+    cfg.comment = 'no';
+    cfg.interactive = 'no';
+    ft_topoplotER(cfg,plotStruc);
+    colorbar;
+    
+    title('C2')
+    
+    subplot(2,3,4)
+    
+     % Plot the matrix for scaled across time
+    bar([1,2],[accuracyAllE.(site{sitex}).C1,accuracyAllE.(site{sitex}).C2]); hold on;
+    plot([0,3],[1/N,1/N],'r--');
+    
+    title([site{sitex},' \Delta shape']);
+    set(gca,'xticklabel',{'C1','C2'},'xlim',[0.5,2.5],'xtick',1:2,'ylim',[0,1]);
+    ylabel('Accuracy');
+       
+    % Plot time series for upper
+    subplot(2,3,5)
+    
+    plot(time,accuracyTime.(site{sitex}).C1,'linewidth',2); hold on;
+    plot([time(1,1),time(1,end)],[1/N,1/N],'r--');
+      
+    set(gca,'box','off','xlim',[-100,1000],'ylim',[0,1])
+    title('C1')
+    xlabel('Time (ms)')
+    ylabel('Accuracy')
+    
+    % Plot time series for upper
+    subplot(2,3,6)
+    
+    plot(time,accuracyTime.(site{sitex}).C2,'linewidth',2); hold on;
+    plot([time(1,1),time(1,end)],[1/N,1/N],'r--');
+      
+    set(gca,'box','off','xlim',[-100,1000],'ylim',[0,1])
+    title('C2')
+    xlabel('Time (ms)')
+    ylabel('Accuracy')
+    
+end
+
+% 
+% % % Load additional data for topoplots 
+% % addpath ('C:\Users\Nigel\Desktop\fieldtrip-20170815');
+% % ft_defaults;
+% % 
+% % load([pathDef,'CLEAN_SOUND1\FT\sound_C1_pfc_t0.mat']);
+% % 
+% % for sitex = 1:size(site,1)
+% %     
+% %     fig = figure;
+% %     set(gcf,'color','w');
+% %     
+% %     for rangex = 1:size(latRange.pfc,1)
+% %         
+% %         subplot(2,5,rangex)
+% %         
+% %         % Settings for topoplot
+% %         plotStruc = [];
+% %         plotStruc.avg = uChan.(rangeName{rangex}).(site{sitex}).uP;
+% %         plotStruc.time = 1;
+% %         plotStruc.dimord = 'chan_time';
+% %         plotStruc.label = grandAverage.label;
+% % 
+% %         % Check if any channels are p < 0.05 and plot with stars
+% %         cfg = [];
+% %         statmask = pChan.(rangeName{rangex}).(site{sitex}).uP < 0.05;
+% %         if sum(statmask) > 0
+% %             cfg.highlight = 'on';
+% %             cfg.highlightchannel   =  plotStruc.label(statmask);
+% %             cfg.highlightsymbol    = '*';
+% %             cfg.highlightcolor = [0.99 0.99 0.99];
+% %             cfg.highlightsize = 10;
+% %         end
+% % 
+% %         cfg.layout = 'easycapM11.mat'; 
+% %         cfg.comment = 'no';
+% %         cfg.interactive = 'no';
+% %         ft_topoplotER(cfg,plotStruc);
+% % 
+% %         title([num2str(latRange.(site{sitex})(rangex,1)),'-',num2str(latRange.(site{sitex})(rangex,2)),' ms']);
+% %         
+% %     end
+% %     
+% %     numpTemp = 6:10;
+% %     for rangex = 1:size(latRange.pfc,1)
+% %         
+% %         subplot(2,5,numpTemp(rangex))
+% %         
+% %         % Settings for topoplot
+% %         plotStruc = [];
+% %         plotStruc.avg = uChan.(rangeName{rangex}).(site{sitex}).lP;
+% %         plotStruc.time = 1;
+% %         plotStruc.dimord = 'chan_time';
+% %         plotStruc.label = grandAverage.label;
+% % 
+% %         % Check if any channels are p < 0.05 and plot with stars
+% %         cfg = [];
+% %         statmask = pChan.(rangeName{rangex}).(site{sitex}).lP < 0.05;
+% %         if sum(statmask) > 0
+% %             cfg.highlight = 'on';
+% %             cfg.highlightchannel   =  plotStruc.label(statmask);
+% %             cfg.highlightsymbol    = '*';
+% %             cfg.highlightcolor = [0.99 0.99 0.99];
+% %             cfg.highlightsize = 10;
+% %         end
+% % 
+% %         cfg.layout = 'easycapM11.mat'; 
+% %         cfg.comment = 'no';
+% %         cfg.interactive = 'no';
+% %         ft_topoplotER(cfg,plotStruc);
+% %         
+% %         title([num2str(latRange.(site{sitex})(rangex,1)),'-',num2str(latRange.(site{sitex})(rangex,2)),' ms']);
+% %         
+% %     end
+% % end
+% 
+% 
+% % Violin plot of the differences between conditions
+% dataCell = {matchAll.pfc,matchAll.ppc};
+% BF_JitteredParallelScatter(dataCell,1,1,1);
+% 
+% % Adjust settings
+% set(gca,'xlim',[0.5,2.5],'xtick',1:2,'xticklabel',{'pfc','ppc'});
+% xlabel(['p = ',num2str(StatSiteP)]);
+% ylabel('Mean \Delta');
+% 
+% 
