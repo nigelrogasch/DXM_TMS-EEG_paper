@@ -14,9 +14,6 @@ u = '_';
 % 002
 % 013 C1 ppc
 
-% Return which computer is running
-currentComp = getenv('computername');
-
 % Location of 'sound_final' file
 pathIn = 'I:\nmda_tms_eeg\RAW\';
 pathOut = 'I:\nmda_tms_eeg\CLEAN_ICA\';
@@ -56,19 +53,9 @@ u = '_';
 % NO EYE ELECTRODES - REQUIRE ALTERNATIVE SCRIPT
 % 002
 
-% Return which computer is running
-currentComp = getenv('computername');
-
-% Select path based on computer
-if strcmp(currentComp,'CHEWBACCA')
-    % Location of 'sound_final' file
-    pathIn = 'I:\nmda_tms_eeg\RAW\';
-    pathOut = 'I:\nmda_tms_eeg\CLEAN_ICA1\';
-else
-    % Location of 'sound_final' file
-    pathIn = 'D:\nmda_tms_eeg\RAW\';
-    pathOut = 'D:\nmda_tms_eeg\CLEAN_ICA1\';
-end
+% Location of 'sound_final' file
+pathIn = 'I:\nmda_tms_eeg\RAW\';
+pathOut = 'I:\nmda_tms_eeg\CLEAN_ICA\';
 
 eeglab
 

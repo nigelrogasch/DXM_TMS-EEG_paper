@@ -9,9 +9,6 @@ tms = 'tms';
 tr = {'t0';'t1'};
 u = '_';
 
-% Return which computer is running
-currentComp = getenv('computername');
-
 % Location of 'sound_final' file
 pathIn = 'I:\nmda_tms_eeg\RAW\';
 pathOut = 'I:\nmda_tms_eeg\CLEAN_ICA\';
